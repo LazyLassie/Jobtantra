@@ -1,0 +1,25 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/jobtantra}
+    username: ${DATABASE_USERNAME:jobtantra}
+    password: ${DATABASE_PASSWORD:jobtantra}
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: false
+
+logging:
+  level:
+    com.jobtantra: DEBUG
+    org.springframework.security: INFO
