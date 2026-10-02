@@ -7,7 +7,8 @@ import org.junit.jupiter.api.Test;
 class JobTantraApplicationTests {
 
     @Test
-    void foundationTestRuns() {
-        assertTrue(true);
+    void applicationClassIsPresent() {
+        assertTrue(JobTantraApplication.class.isAnnotationPresent(
+                org.springframework.boot.autoconfigure.SpringBootApplication.class));
     }
 }

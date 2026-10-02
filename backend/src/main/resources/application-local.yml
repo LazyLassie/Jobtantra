@@ -5,8 +5,8 @@ spring:
 
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/jobtantra}
-    username: ${DATABASE_USERNAME:jobtantra}
-    password: ${DATABASE_PASSWORD:jobtantra}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:Pr@churya#28}
   data:
     redis:
       url: ${REDIS_URL:redis://localhost:6379}
@@ -15,9 +15,13 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
 
   flyway:
-    enabled: false
+    enabled: true
 
 logging:
   level:
