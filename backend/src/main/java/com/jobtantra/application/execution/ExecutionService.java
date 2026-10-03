@@ -14,6 +14,7 @@ import com.jobtantra.infrastructure.persistence.repository.JobRepository;
 import jakarta.transaction.Transactional;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
@@ -39,12 +40,14 @@ public class ExecutionService {
         validateIdempotencyKey(idempotencyKey);
         Job job = jobRepository.findByIdForUpdate(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("Job not found: " + jobId));
+        Optional<JobExecution> existing = executionRepository.findByJob_IdAndIdempotencyKey(jobId, idempotencyKey);
+        if (existing.isPresent()) {
+            return new ExecutionCreationResult(toResponse(existing.get()), false);
+        }
         if (job.getStatus() != JobStatus.ACTIVE) {
             throw new ExecutionStateException("Only ACTIVE jobs can create executions");
         }
-        return executionRepository.findByJob_IdAndIdempotencyKey(jobId, idempotencyKey)
-                .map(execution -> new ExecutionCreationResult(toResponse(execution), false))
-                .orElseGet(() -> createNew(job, idempotencyKey));
+        return createNew(job, idempotencyKey);
     }
 
     @Transactional

@@ -3,6 +3,8 @@ package com.jobtantra.application.execution;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,6 +22,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -61,11 +64,54 @@ class ExecutionServiceTest {
     }
 
     @Test
-    void returnsExistingExecutionForDuplicateIdempotencyKey() {
+        void duplicateDispatchReturnsExistingExecutionWithoutCreatingAnother() {
         Job job = job(JobStatus.ACTIVE);
         JobExecution existing = execution(job, "request-1", ExecutionStatus.QUEUED);
         when(jobRepository.findByIdForUpdate(JOB_ID)).thenReturn(Optional.of(job));
         when(executionRepository.findByJob_IdAndIdempotencyKey(JOB_ID, "request-1")).thenReturn(Optional.of(existing));
+
+        var firstResponse = service.create(JOB_ID, "request-1");
+        var duplicateResponse = service.create(JOB_ID, "request-1");
+
+        assertThat(firstResponse.created()).isFalse();
+        assertThat(duplicateResponse.created()).isFalse();
+        assertThat(duplicateResponse.response().id()).isEqualTo(firstResponse.response().id());
+        assertThat(duplicateResponse.response().id()).isEqualTo(existing.getId());
+        verify(executionRepository, times(2)).findByJob_IdAndIdempotencyKey(JOB_ID, "request-1");
+        verify(executionRepository, never()).saveAndFlush(any(JobExecution.class));
+        }
+
+        @Test
+        void differentIdempotencyKeysCreateDistinctLogicalExecutions() {
+        Job job = job(JobStatus.ACTIVE);
+        when(jobRepository.findByIdForUpdate(JOB_ID)).thenReturn(Optional.of(job));
+        when(executionRepository.findByJob_IdAndIdempotencyKey(JOB_ID, "request-1"))
+            .thenReturn(Optional.empty());
+        when(executionRepository.findByJob_IdAndIdempotencyKey(JOB_ID, "request-2"))
+            .thenReturn(Optional.empty());
+        when(executionRepository.saveAndFlush(any(JobExecution.class)))
+            .thenAnswer(invocation -> invocation.getArgument(0));
+
+        var firstResponse = service.create(JOB_ID, "request-1");
+        var secondResponse = service.create(JOB_ID, "request-2");
+
+        ArgumentCaptor<JobExecution> executions = ArgumentCaptor.forClass(JobExecution.class);
+        verify(executionRepository, times(2)).saveAndFlush(executions.capture());
+        assertThat(firstResponse.created()).isTrue();
+        assertThat(secondResponse.created()).isTrue();
+        assertThat(executions.getAllValues()).extracting(JobExecution::getIdempotencyKey)
+            .containsExactly("request-1", "request-2");
+        assertThat(executions.getAllValues().get(0)).isNotSameAs(executions.getAllValues().get(1));
+        }
+
+        @Test
+        void returnsExistingExecutionForIdempotencyKeyEvenWhenJobIsInactive() {
+            Job job = job(JobStatus.ACTIVE);
+            job.transitionTo(JobStatus.CANCELLED);
+        JobExecution existing = execution(job, "request-1", ExecutionStatus.QUEUED);
+        when(jobRepository.findByIdForUpdate(JOB_ID)).thenReturn(Optional.of(job));
+        when(executionRepository.findByJob_IdAndIdempotencyKey(JOB_ID, "request-1"))
+            .thenReturn(Optional.of(existing));
 
         var response = service.create(JOB_ID, "request-1");
 
