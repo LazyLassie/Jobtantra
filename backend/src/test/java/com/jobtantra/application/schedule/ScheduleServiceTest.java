@@ -2,6 +2,9 @@ package com.jobtantra.application.schedule;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -76,6 +79,28 @@ class ScheduleServiceTest {
         verify(executionService).create(any(), org.mockito.ArgumentMatchers.eq("schedule:null:2026-10-01T12:00:00Z"));
         verify(executionWorkerService).process(executionId);
         verify(scheduleRepository).saveAndFlush(schedule);
+    }
+
+    @Test
+    void duplicateDueOccurrenceReusesStableIdempotencyKey() {
+        Instant occurrence = Instant.parse("2026-10-01T12:00:00Z");
+        UUID scheduleId = UUID.randomUUID();
+        JobSchedule schedule = mock(JobSchedule.class);
+        when(schedule.getId()).thenReturn(scheduleId);
+        when(schedule.getJobId()).thenReturn(JOB_ID);
+        when(schedule.getScheduleType()).thenReturn(ScheduleType.ONE_TIME);
+        when(schedule.getNextRunAt()).thenReturn(occurrence);
+        when(scheduleRepository.findDueForUpdate(any(), eq(JobStatus.ACTIVE)))
+                .thenReturn(java.util.List.of(schedule));
+        UUID executionId = UUID.randomUUID();
+        when(executionService.create(any(), any())).thenReturn(new ExecutionCreationResult(
+                new JobExecutionResponse(executionId, JOB_ID, UUID.randomUUID(), ExecutionStatus.QUEUED, 1,
+                        null, null, null, null, null, Instant.now(), Instant.now()), false));
+
+        service.processDueSchedules(occurrence.plusSeconds(1));
+        service.processDueSchedules(occurrence.plusSeconds(2));
+
+        verify(executionService, times(2)).create(JOB_ID, "schedule:" + scheduleId + ":" + occurrence);
     }
 
     private Job activeJob() {
