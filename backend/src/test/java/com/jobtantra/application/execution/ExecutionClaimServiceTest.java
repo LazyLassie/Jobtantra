@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @ExtendWith(MockitoExtension.class)
 class ExecutionClaimServiceTest {
@@ -30,10 +31,12 @@ class ExecutionClaimServiceTest {
     @Mock private JobExecutionRepository executionRepository;
 
     private ExecutionClaimService claimService;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
-        claimService = new ExecutionClaimService(executionRepository, 5);
+        meterRegistry = new SimpleMeterRegistry();
+        claimService = new ExecutionClaimService(executionRepository, 5, meterRegistry);
     }
 
     @Test
@@ -53,6 +56,7 @@ class ExecutionClaimServiceTest {
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
         assertThat(execution.getLatestAttempt().getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
         assertThat(execution.getClaimToken()).isNull();
+        assertThat(meterRegistry.get("jobtantra.executions.success").counter().count()).isEqualTo(1.0);
     }
 
     @Test
@@ -68,6 +72,7 @@ class ExecutionClaimServiceTest {
         assertThat(execution.getLatestAttempt().getStatus()).isEqualTo(ExecutionStatus.FAILED);
         assertThat(execution.getLatestAttempt().getErrorMessage()).isEqualTo("Execution failed");
         assertThat(execution.getLatestAttempt().getFailureDetail()).contains("database secret");
+        assertThat(meterRegistry.get("jobtantra.executions.failure").counter().count()).isEqualTo(1.0);
     }
 
     @Test
@@ -111,6 +116,25 @@ class ExecutionClaimServiceTest {
             NOW.plusSeconds(1));
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.RUNNING);
         assertThat(execution.getClaimToken()).isEqualTo(claim.claimToken());
+    }
+
+    @Test
+    void expiredRunningAttemptRemainsTimedOutWhenRetriesAreExhausted() {
+        JobExecution execution = queuedExecution(new RetryPolicy(0, 0, 0, BigDecimal.ONE));
+        execution.getLatestAttempt().transitionTo(ExecutionStatus.RUNNING, NOW.minusSeconds(30));
+        execution.claim(UUID.randomUUID(), NOW.minusSeconds(1));
+        when(executionRepository.findExpiredRunningIdForUpdate(NOW)).thenReturn(Optional.of(EXECUTION_ID));
+        when(executionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(executionRepository.findNextQueuedIdForUpdate(NOW)).thenReturn(Optional.empty());
+        when(executionRepository.saveAndFlush(execution)).thenReturn(execution);
+
+        var claim = claimService.claimNext(NOW);
+
+        assertThat(claim).isEmpty();
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.TIMED_OUT);
+        assertThat(execution.getLatestAttempt().getStatus()).isEqualTo(ExecutionStatus.TIMED_OUT);
+        assertThat(execution.getAttempts()).hasSize(1);
+        assertThat(execution.getClaimToken()).isNull();
     }
 
     private void stubQueued(JobExecution execution) {

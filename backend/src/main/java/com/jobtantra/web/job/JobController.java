@@ -33,6 +33,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.parameters.P;
 
 @RestController
 @RequestMapping("/api/v1/jobs")
@@ -51,8 +54,9 @@ public class JobController {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Job created"),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Invalid request", content = @Content(schema = @Schema(implementation = com.jobtantra.common.api.ApiError.class)))
     })
-    public ResponseEntity<ApiResponse<JobResponse>> create(@Valid @RequestBody JobCreateRequest request) {
-        JobResponse response = jobService.create(request);
+    public ResponseEntity<ApiResponse<JobResponse>> create(@Valid @RequestBody JobCreateRequest request,
+            Authentication authentication) {
+        JobResponse response = jobService.create(request, authentication.getName());
         return ResponseEntity.created(URI.create("/api/v1/jobs/" + response.id())).body(ApiResponse.of(response));
     }
 
@@ -61,45 +65,54 @@ public class JobController {
     public ResponseEntity<ApiResponse<PageResponse<JobResponse>>> list(
             @Parameter(description = "Filter by job lifecycle status", in = ParameterIn.QUERY)
             @RequestParam(required = false) JobStatus status,
-            @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(ApiResponse.of(jobService.list(status, pageable)));
+            @ParameterObject @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
+            Authentication authentication) {
+            boolean admin = authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
+            return ResponseEntity.ok(ApiResponse.of(jobService.list(status, pageable, authentication.getName(), admin)));
     }
 
     @GetMapping("/{id}")
+                @PreAuthorize("@jobAuthorization.canAccessJob(#id, authentication)")
     @Operation(summary = "Get a job")
-    public ResponseEntity<ApiResponse<JobResponse>> get(@PathVariable UUID id) {
+            public ResponseEntity<ApiResponse<JobResponse>> get(@P("id") @PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.of(jobService.get(id)));
     }
 
     @PatchMapping("/{id}")
+    @PreAuthorize("@jobAuthorization.canAccessJob(#id, authentication)")
     @Operation(summary = "Update editable job metadata")
-    public ResponseEntity<ApiResponse<JobResponse>> update(@PathVariable UUID id,
+    public ResponseEntity<ApiResponse<JobResponse>> update(@P("id") @PathVariable UUID id,
             @Valid @RequestBody JobUpdateRequest request) {
         return ResponseEntity.ok(ApiResponse.of(jobService.update(id, request)));
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("@jobAuthorization.canAccessJob(#id, authentication)")
     @Operation(summary = "Delete a draft job")
-    public ResponseEntity<Void> delete(@PathVariable UUID id) {
+    public ResponseEntity<Void> delete(@P("id") @PathVariable UUID id) {
         jobService.delete(id);
         return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/cancel")
+    @PreAuthorize("@jobAuthorization.canAccessJob(#id, authentication)")
     @Operation(summary = "Cancel a job")
-    public ResponseEntity<ApiResponse<JobResponse>> cancel(@PathVariable UUID id) {
+    public ResponseEntity<ApiResponse<JobResponse>> cancel(@P("id") @PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.of(jobService.cancel(id)));
     }
 
     @PostMapping("/{id}/activate")
+    @PreAuthorize("@jobAuthorization.canAccessJob(#id, authentication)")
     @Operation(summary = "Activate a draft job", description = "Transitions a DRAFT job to ACTIVE.")
-    public ResponseEntity<ApiResponse<JobResponse>> activate(@PathVariable UUID id) {
+    public ResponseEntity<ApiResponse<JobResponse>> activate(@P("id") @PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.of(jobService.activate(id)));
     }
 
     @GetMapping("/{id}/executions")
+    @PreAuthorize("@jobAuthorization.canAccessJob(#id, authentication)")
     @Operation(summary = "Get job execution history")
-    public ResponseEntity<ApiResponse<List<JobExecutionResponse>>> executions(@PathVariable UUID id) {
+    public ResponseEntity<ApiResponse<List<JobExecutionResponse>>> executions(@P("id") @PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.of(jobService.executions(id)));
     }
 }

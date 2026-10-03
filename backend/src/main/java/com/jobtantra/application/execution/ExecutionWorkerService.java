@@ -2,14 +2,11 @@ package com.jobtantra.application.execution;
 
 import java.time.Instant;
 import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ExecutionWorkerService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ExecutionWorkerService.class);
     private final ExecutionClaimService claimService;
     private final ExecutionHandler executionHandler;
 
@@ -29,7 +26,6 @@ public class ExecutionWorkerService {
         try {
             executionHandler.execute(claim.execution());
         } catch (Exception exception) {
-            LOGGER.error("Execution handler failed for execution {}", claim.execution().getId(), exception);
             failure = exception;
             interrupted = exception instanceof InterruptedException;
         }

@@ -16,6 +16,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -24,15 +27,19 @@ import org.springframework.stereotype.Service;
 @Service
 public class ExecutionService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(ExecutionService.class);
+
     private final JobRepository jobRepository;
     private final JobExecutionRepository executionRepository;
     private final JobAttemptRepository attemptRepository;
+    private final MeterRegistry meterRegistry;
 
     public ExecutionService(JobRepository jobRepository, JobExecutionRepository executionRepository,
-            JobAttemptRepository attemptRepository) {
+            JobAttemptRepository attemptRepository, MeterRegistry meterRegistry) {
         this.jobRepository = jobRepository;
         this.executionRepository = executionRepository;
         this.attemptRepository = attemptRepository;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -79,6 +86,8 @@ public class ExecutionService {
         execution.updateStatus(ExecutionStatus.CANCELLED);
         execution.clearClaim();
         executionRepository.saveAndFlush(execution);
+        meterRegistry.counter("jobtantra.executions.cancelled").increment();
+        LOGGER.info("Execution cancelled jobId={} executionId={}", execution.getJobId(), execution.getId());
         return toResponse(execution);
     }
 
@@ -105,7 +114,10 @@ public class ExecutionService {
             JobExecution execution = new JobExecution(job, idempotencyKey);
             execution.addAttempt();
             execution.updateStatus(ExecutionStatus.QUEUED);
-                return new ExecutionCreationResult(toResponse(executionRepository.saveAndFlush(execution)), true);
+            JobExecution saved = executionRepository.saveAndFlush(execution);
+            meterRegistry.counter("jobtantra.executions.created").increment();
+            LOGGER.info("Execution created and dispatched jobId={} executionId={}", job.getId(), saved.getId());
+            return new ExecutionCreationResult(toResponse(saved), true);
         } catch (DataIntegrityViolationException exception) {
             return executionRepository.findByJob_IdAndIdempotencyKey(job.getId(), idempotencyKey)
                     .map(existing -> new ExecutionCreationResult(toResponse(existing), false))

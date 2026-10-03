@@ -23,11 +23,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @ExtendWith(MockitoExtension.class)
 class ExecutionServiceTest {
@@ -40,12 +42,14 @@ class ExecutionServiceTest {
     private JobAttemptRepository attemptRepository;
 
     private ExecutionService service;
+    private SimpleMeterRegistry meterRegistry;
     private static final UUID JOB_ID = UUID.randomUUID();
     private static final UUID EXECUTION_ID = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
-        service = new ExecutionService(jobRepository, executionRepository, attemptRepository);
+        meterRegistry = new SimpleMeterRegistry();
+        service = new ExecutionService(jobRepository, executionRepository, attemptRepository, meterRegistry);
     }
 
     @Test
@@ -61,6 +65,7 @@ class ExecutionServiceTest {
         assertThat(response.response().status()).isEqualTo(ExecutionStatus.QUEUED);
         assertThat(response.response().attemptNumber()).isOne();
         verify(executionRepository).saveAndFlush(any(JobExecution.class));
+        assertThat(meterRegistry.get("jobtantra.executions.created").counter().count()).isEqualTo(1.0);
     }
 
     @Test
@@ -138,20 +143,23 @@ class ExecutionServiceTest {
 
         assertThat(response.status()).isEqualTo(ExecutionStatus.CANCELLED);
         verify(executionRepository).saveAndFlush(execution);
+        assertThat(meterRegistry.get("jobtantra.executions.cancelled").counter().count()).isEqualTo(1.0);
     }
 
     @Test
     void retriesFailedExecutionUnderSameExecution() {
         JobExecution execution = execution(job(JobStatus.ACTIVE), "request-1", ExecutionStatus.FAILED);
-        UUID executionIdBefore = execution.getId();
+        ReflectionTestUtils.setField(execution, "id", EXECUTION_ID);
         when(executionRepository.findByIdForUpdate(EXECUTION_ID)).thenReturn(Optional.of(execution));
         when(executionRepository.saveAndFlush(execution)).thenReturn(execution);
 
         var response = service.retry(EXECUTION_ID);
 
-        assertThat(response.id()).isEqualTo(executionIdBefore);
+        assertThat(response.id()).isEqualTo(EXECUTION_ID);
         assertThat(response.status()).isEqualTo(ExecutionStatus.QUEUED);
         assertThat(response.attemptNumber()).isEqualTo(2);
+        assertThat(execution.getAttempts()).hasSize(2);
+        assertThat(execution.getIdempotencyKey()).isEqualTo("request-1");
     }
 
     @Test

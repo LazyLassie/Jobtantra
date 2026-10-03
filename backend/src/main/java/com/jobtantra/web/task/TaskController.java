@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.parameters.P;
 
 @RestController
 @RequestMapping("/api/v1/jobs/{jobId}/tasks")
@@ -32,8 +34,9 @@ public class TaskController {
     }
 
     @PostMapping
+    @PreAuthorize("@jobAuthorization.canAccessJob(#jobId, authentication)")
     @Operation(summary = "Create a task for a draft job")
-    public ResponseEntity<ApiResponse<TaskResponse>> create(@PathVariable UUID jobId,
+    public ResponseEntity<ApiResponse<TaskResponse>> create(@P("jobId") @PathVariable UUID jobId,
             @Valid @RequestBody TaskCreateRequest request) {
         TaskResponse response = taskService.create(jobId, request);
         return ResponseEntity.created(URI.create("/api/v1/jobs/" + jobId + "/tasks/" + response.id()))
@@ -41,20 +44,23 @@ public class TaskController {
     }
 
     @GetMapping
+    @PreAuthorize("@jobAuthorization.canAccessJob(#jobId, authentication)")
     @Operation(summary = "List tasks for a job")
-    public ResponseEntity<ApiResponse<List<TaskResponse>>> list(@PathVariable UUID jobId) {
+    public ResponseEntity<ApiResponse<List<TaskResponse>>> list(@P("jobId") @PathVariable UUID jobId) {
         return ResponseEntity.ok(ApiResponse.of(taskService.list(jobId)));
     }
 
     @GetMapping("/{taskId}")
+    @PreAuthorize("@jobAuthorization.canAccessJob(#jobId, authentication)")
     @Operation(summary = "Get a task")
-    public ResponseEntity<ApiResponse<TaskResponse>> get(@PathVariable UUID jobId, @PathVariable UUID taskId) {
+    public ResponseEntity<ApiResponse<TaskResponse>> get(@P("jobId") @PathVariable UUID jobId, @PathVariable UUID taskId) {
         return ResponseEntity.ok(ApiResponse.of(taskService.get(jobId, taskId)));
     }
 
     @PatchMapping("/{taskId}")
+    @PreAuthorize("@jobAuthorization.canAccessJob(#jobId, authentication)")
     @Operation(summary = "Update task configuration for a draft job")
-    public ResponseEntity<ApiResponse<TaskResponse>> updateConfiguration(@PathVariable UUID jobId,
+    public ResponseEntity<ApiResponse<TaskResponse>> updateConfiguration(@P("jobId") @PathVariable UUID jobId,
             @PathVariable UUID taskId, @Valid @RequestBody TaskConfigurationUpdateRequest request) {
         return ResponseEntity.ok(ApiResponse.of(taskService.updateConfiguration(jobId, taskId, request)));
     }

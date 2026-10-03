@@ -14,6 +14,7 @@ import com.jobtantra.application.job.dto.JobExecutionResponse;
 import com.jobtantra.common.exception.GlobalExceptionHandler;
 import com.jobtantra.domain.model.ExecutionStatus;
 import com.jobtantra.security.SecurityConfig;
+import com.jobtantra.security.JobAuthorization;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -23,9 +24,14 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.core.Authentication;
+import org.junit.jupiter.api.BeforeEach;
+import static org.mockito.Mockito.lenient;
+import org.springframework.test.context.TestPropertySource;
 
 @WebMvcTest(ExecutionController.class)
 @Import({GlobalExceptionHandler.class, SecurityConfig.class})
+@TestPropertySource(properties = "jobtantra.auth.jwt-secret=security-tests-jwt-secret-at-least-32-bytes")
 @WithMockUser
 class ExecutionControllerTest {
 
@@ -34,9 +40,17 @@ class ExecutionControllerTest {
 
     @MockBean
     private ExecutionService executionService;
+    @MockBean(name = "jobAuthorization")
+    private JobAuthorization jobAuthorization;
 
     private static final UUID JOB_ID = UUID.randomUUID();
     private static final UUID EXECUTION_ID = UUID.randomUUID();
+
+    @BeforeEach
+    void allowOwnedResources() {
+        lenient().when(jobAuthorization.canAccessJob(any(UUID.class), any(Authentication.class))).thenReturn(true);
+        lenient().when(jobAuthorization.canAccessExecution(any(UUID.class), any(Authentication.class))).thenReturn(true);
+    }
 
     @Test
     void createsExecutionWithIdempotencyKey() throws Exception {

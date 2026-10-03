@@ -28,6 +28,7 @@ import com.jobtantra.common.exception.ResourceNotFoundException;
 import com.jobtantra.domain.model.ExecutionStatus;
 import com.jobtantra.domain.model.JobStatus;
 import com.jobtantra.security.SecurityConfig;
+import com.jobtantra.security.JobAuthorization;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -41,9 +42,19 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.core.Authentication;
+import org.junit.jupiter.api.BeforeEach;
+import static org.mockito.Mockito.lenient;
 
 @WebMvcTest(JobController.class)
 @Import({GlobalExceptionHandler.class, SecurityConfig.class})
+@TestPropertySource(properties = "jobtantra.auth.jwt-secret=security-tests-jwt-secret-at-least-32-bytes")
 @WithMockUser
 class JobControllerTest {
 
@@ -55,12 +66,23 @@ class JobControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+        @Autowired
+        private JwtEncoder jwtEncoder;
+
     @MockBean
     private JobService jobService;
 
+        @MockBean(name = "jobAuthorization")
+        private JobAuthorization jobAuthorization;
+
+        @BeforeEach
+        void allowOwnedJobs() {
+                lenient().when(jobAuthorization.canAccessJob(any(UUID.class), any(Authentication.class))).thenReturn(true);
+        }
+
     @Test
     void createsJob() throws Exception {
-        when(jobService.create(any())).thenReturn(jobResponse(JobStatus.DRAFT));
+        when(jobService.create(any(), eq("user"))).thenReturn(jobResponse(JobStatus.DRAFT));
 
         mockMvc.perform(post("/api/v1/jobs")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -90,7 +112,7 @@ class JobControllerTest {
 
     @Test
     void listsJobs() throws Exception {
-        when(jobService.list(eq(JobStatus.ACTIVE), any())).thenReturn(
+        when(jobService.list(eq(JobStatus.ACTIVE), any(), eq("user"), eq(false))).thenReturn(
                 new PageResponse<>(List.of(jobResponse(JobStatus.ACTIVE)), 0, 20, 1, 1, true, true));
 
         mockMvc.perform(get("/api/v1/jobs").param("status", "ACTIVE"))
@@ -101,13 +123,23 @@ class JobControllerTest {
 
     @Test
     void authenticatedUserCanListJobs() throws Exception {
-        when(jobService.list(eq(null), any())).thenReturn(
+        when(jobService.list(eq(null), any(), eq("user"), eq(false))).thenReturn(
                 new PageResponse<>(List.of(jobResponse(JobStatus.DRAFT)), 0, 20, 1, 1, true, true));
 
         mockMvc.perform(get("/api/v1/jobs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content[0].status").value("DRAFT"));
     }
+
+        @Test
+        void validBearerUserCanAccessOwnedJob() throws Exception {
+                when(jobService.get(JOB_ID)).thenReturn(jobResponse(JobStatus.ACTIVE));
+                String token = token("user", "USER");
+
+                mockMvc.perform(get("/api/v1/jobs/{id}", JOB_ID).header("Authorization", "Bearer " + token))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.data.name").value("daily-import"));
+        }
 
     @Test
     void updatesJob() throws Exception {
@@ -148,6 +180,15 @@ class JobControllerTest {
                 .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
     }
 
+        @Test
+        void forbidsUserFromAccessingAnotherUsersJob() throws Exception {
+                when(jobAuthorization.canAccessJob(eq(JOB_ID), any(Authentication.class))).thenReturn(false);
+
+                mockMvc.perform(get("/api/v1/jobs/{id}", JOB_ID))
+                                .andExpect(status().isForbidden())
+                                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        }
+
     @Test
     void cancelsJob() throws Exception {
         when(jobService.cancel(JOB_ID)).thenReturn(jobResponse(JobStatus.CANCELLED));
@@ -185,5 +226,18 @@ class JobControllerTest {
     private JobResponse jobResponse(JobStatus status) {
         return new JobResponse(JOB_ID, "daily-import", "Import data", status, Instant.now(), Instant.now(), "owner", 10,
                 300, new RetryPolicyResponse(3, 30, 3_600, BigDecimal.valueOf(2)), Map.of("source", "s3"));
+    }
+
+    private String token(String username, String role) {
+        Instant issuedAt = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer("jobtantra")
+                .subject(username)
+                .issuedAt(issuedAt)
+                .expiresAt(issuedAt.plusSeconds(600))
+                .claim("roles", List.of(role))
+                .build();
+        return jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+                .getTokenValue();
     }
 }

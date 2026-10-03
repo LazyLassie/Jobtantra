@@ -85,6 +85,23 @@ class ExecutionRepositoryTest {
     }
 
     @Test
+    void validRunningLeaseIsNotAvailableForClaimOrRecovery() {
+        Job job = new Job("valid-claim", null, "owner", 1, 60, RetryPolicy.defaults(), Map.of());
+        job.transitionTo(JobStatus.ACTIVE);
+        jobRepository.saveAndFlush(job);
+        Instant now = Instant.now();
+        JobExecution execution = new JobExecution(job, "valid-claim");
+        execution.addAttempt().transitionTo(ExecutionStatus.RUNNING, now);
+        execution.claim(UUID.randomUUID(), now.plusSeconds(60));
+        executionRepository.saveAndFlush(execution);
+
+        assertThat(executionRepository.findNextQueuedIdForUpdate(now))
+            .isNotEqualTo(Optional.of(execution.getId()));
+        assertThat(executionRepository.findExpiredRunningIdForUpdate(now))
+            .isNotEqualTo(Optional.of(execution.getId()));
+    }
+
+    @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void skipsExecutionAlreadyLockedByAnotherConsumer() throws Exception {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);

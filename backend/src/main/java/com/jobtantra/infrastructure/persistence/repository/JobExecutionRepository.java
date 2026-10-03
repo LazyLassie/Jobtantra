@@ -23,6 +23,8 @@ public interface JobExecutionRepository extends JpaRepository<JobExecution, UUID
 
     Optional<JobExecution> findByJob_IdAndIdempotencyKey(UUID jobId, String idempotencyKey);
 
+        boolean existsByIdAndJob_CreatedBy(UUID id, String createdBy);
+
     @Query(value = "select id from job_executions where status = 'QUEUED' and available_at <= :now "
             + "order by available_at asc, created_at asc limit 1 for update skip locked", nativeQuery = true)
     Optional<UUID> findNextQueuedIdForUpdate(@Param("now") java.time.Instant now);

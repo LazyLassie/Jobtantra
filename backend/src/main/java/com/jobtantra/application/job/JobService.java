@@ -22,6 +22,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.Collections;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -29,30 +32,42 @@ import org.springframework.stereotype.Service;
 @Service
 public class JobService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(JobService.class);
+
     private final JobRepository jobRepository;
     private final JobExecutionRepository jobExecutionRepository;
     private final TaskRepository taskRepository;
+    private final MeterRegistry meterRegistry;
 
     public JobService(JobRepository jobRepository, JobExecutionRepository jobExecutionRepository,
-            TaskRepository taskRepository) {
+            TaskRepository taskRepository, MeterRegistry meterRegistry) {
         this.jobRepository = jobRepository;
         this.jobExecutionRepository = jobExecutionRepository;
         this.taskRepository = taskRepository;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
-    public JobResponse create(JobCreateRequest request) {
+    public JobResponse create(JobCreateRequest request, String ownerUsername) {
         RetryPolicy retryPolicy = toRetryPolicy(request.retryPolicy());
-        Job job = new Job(request.name(), request.description(), request.createdBy(), request.priority(),
+        Job job = new Job(request.name(), request.description(), ownerUsername, request.priority(),
                 request.timeoutSeconds(), retryPolicy, request.configuration());
-        return toResponse(jobRepository.save(job));
+        Job saved = jobRepository.save(job);
+        meterRegistry.counter("jobtantra.jobs.created").increment();
+        LOGGER.info("Job created jobId={}", saved.getId());
+        return toResponse(saved);
     }
 
     @Transactional
-    public PageResponse<JobResponse> list(JobStatus status, Pageable pageable) {
-        Page<Job> jobs = status == null
-                ? jobRepository.findAll(pageable)
-                : jobRepository.findByStatus(status, pageable);
+    public PageResponse<JobResponse> list(JobStatus status, Pageable pageable, String username, boolean admin) {
+        Page<Job> jobs;
+        if (admin) {
+            jobs = status == null ? jobRepository.findAll(pageable) : jobRepository.findByStatus(status, pageable);
+        } else {
+            jobs = status == null
+                    ? jobRepository.findByCreatedBy(username, pageable)
+                    : jobRepository.findByCreatedByAndStatus(username, status, pageable);
+        }
         return new PageResponse<>(jobs.getContent().stream().map(this::toResponse).toList(), jobs.getNumber(),
                 jobs.getSize(), jobs.getTotalElements(), jobs.getTotalPages(), jobs.isFirst(), jobs.isLast());
     }

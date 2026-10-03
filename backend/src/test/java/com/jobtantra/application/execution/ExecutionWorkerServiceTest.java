@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @ExtendWith(MockitoExtension.class)
 class ExecutionWorkerServiceTest {
@@ -39,7 +40,7 @@ class ExecutionWorkerServiceTest {
 
     @BeforeEach
     void setUp() {
-        claimService = new ExecutionClaimService(executionRepository, 0);
+        claimService = new ExecutionClaimService(executionRepository, 0, new SimpleMeterRegistry());
         worker = new ExecutionWorkerService(claimService, executionHandler);
     }
 

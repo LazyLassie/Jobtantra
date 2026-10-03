@@ -16,6 +16,7 @@ import com.jobtantra.application.schedule.dto.ScheduleResponse;
 import com.jobtantra.common.exception.GlobalExceptionHandler;
 import com.jobtantra.domain.model.ScheduleType;
 import com.jobtantra.security.SecurityConfig;
+import com.jobtantra.security.JobAuthorization;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -26,17 +27,29 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.core.Authentication;
+import org.junit.jupiter.api.BeforeEach;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import org.springframework.test.context.TestPropertySource;
 
 @WebMvcTest(ScheduleController.class)
 @Import({GlobalExceptionHandler.class, SecurityConfig.class})
+@TestPropertySource(properties = "jobtantra.auth.jwt-secret=security-tests-jwt-secret-at-least-32-bytes")
 @WithMockUser
 class ScheduleControllerTest {
 
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @MockBean private ScheduleService scheduleService;
+    @MockBean(name = "jobAuthorization") private JobAuthorization jobAuthorization;
 
     private static final UUID JOB_ID = UUID.randomUUID();
+
+    @BeforeEach
+    void allowOwnedResources() {
+        lenient().when(jobAuthorization.canAccessJob(any(UUID.class), any(Authentication.class))).thenReturn(true);
+    }
 
     @Test
     void upsertsSchedule() throws Exception {

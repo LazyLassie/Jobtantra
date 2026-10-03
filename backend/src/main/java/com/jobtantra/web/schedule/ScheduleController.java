@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.parameters.P;
 
 @RestController
 @RequestMapping("/api/v1/jobs/{jobId}/schedule")
@@ -29,21 +31,24 @@ public class ScheduleController {
     }
 
     @PutMapping
+    @PreAuthorize("@jobAuthorization.canAccessJob(#jobId, authentication)")
     @Operation(summary = "Create or replace a job schedule")
-    public ResponseEntity<ApiResponse<ScheduleResponse>> upsert(@PathVariable UUID jobId,
+    public ResponseEntity<ApiResponse<ScheduleResponse>> upsert(@P("jobId") @PathVariable UUID jobId,
             @Valid @RequestBody ScheduleRequest request) {
         return ResponseEntity.ok(ApiResponse.of(scheduleService.upsert(jobId, request)));
     }
 
     @GetMapping
+    @PreAuthorize("@jobAuthorization.canAccessJob(#jobId, authentication)")
     @Operation(summary = "Get a job schedule")
-    public ResponseEntity<ApiResponse<ScheduleResponse>> get(@PathVariable UUID jobId) {
+    public ResponseEntity<ApiResponse<ScheduleResponse>> get(@P("jobId") @PathVariable UUID jobId) {
         return ResponseEntity.ok(ApiResponse.of(scheduleService.get(jobId)));
     }
 
     @DeleteMapping
+    @PreAuthorize("@jobAuthorization.canAccessJob(#jobId, authentication)")
     @Operation(summary = "Remove a job schedule")
-    public ResponseEntity<Void> remove(@PathVariable UUID jobId) {
+    public ResponseEntity<Void> remove(@P("jobId") @PathVariable UUID jobId) {
         scheduleService.remove(jobId);
         return ResponseEntity.noContent().build();
     }

@@ -8,12 +8,16 @@ import static org.mockito.Mockito.verify;
 import com.jobtantra.domain.model.Job;
 import com.jobtantra.domain.model.JobStatus;
 import com.jobtantra.domain.model.RetryPolicy;
+import com.jobtantra.application.job.dto.JobCreateRequest;
+import com.jobtantra.application.job.dto.RetryPolicyRequest;
 import com.jobtantra.infrastructure.persistence.repository.JobExecutionRepository;
 import com.jobtantra.infrastructure.persistence.repository.JobRepository;
 import com.jobtantra.infrastructure.persistence.repository.TaskRepository;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.math.BigDecimal;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,10 +37,24 @@ class JobServiceTest {
     private TaskRepository taskRepository;
 
     private JobService jobService;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
-        jobService = new JobService(jobRepository, jobExecutionRepository, taskRepository);
+        meterRegistry = new SimpleMeterRegistry();
+        jobService = new JobService(jobRepository, jobExecutionRepository, taskRepository, meterRegistry);
+    }
+
+    @Test
+    void creatingJobIncrementsJobsCreatedCounter() {
+        when(jobRepository.save(org.mockito.ArgumentMatchers.any(Job.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        JobCreateRequest request = new JobCreateRequest("metrics-job", null, "ignored", 1, 60L,
+                new RetryPolicyRequest(0, 0L, 0L, BigDecimal.ONE), Map.of());
+
+        jobService.create(request, "alice");
+
+        assertThat(meterRegistry.get("jobtantra.jobs.created").counter().count()).isEqualTo(1.0);
     }
 
     @Test

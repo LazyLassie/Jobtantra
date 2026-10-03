@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.parameters.P;
 
 @RestController
 @Tag(name = "Executions", description = "Create and manage logical job executions")
@@ -32,8 +34,9 @@ public class ExecutionController {
     }
 
     @PostMapping("/api/v1/jobs/{jobId}/executions")
+    @PreAuthorize("@jobAuthorization.canAccessJob(#jobId, authentication)")
     @Operation(summary = "Create a queued execution", description = "Creates one logical execution and its first queued attempt. Requires Idempotency-Key.")
-    public ResponseEntity<ApiResponse<JobExecutionResponse>> create(@PathVariable UUID jobId,
+    public ResponseEntity<ApiResponse<JobExecutionResponse>> create(@P("jobId") @PathVariable UUID jobId,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
         ExecutionCreationResult result = executionService.create(jobId, idempotencyKey);
         if (!result.created()) {
@@ -44,20 +47,23 @@ public class ExecutionController {
     }
 
     @GetMapping("/api/v1/executions/{executionId}")
+    @PreAuthorize("@jobAuthorization.canAccessExecution(#executionId, authentication)")
     @Operation(summary = "Get an execution")
-    public ResponseEntity<ApiResponse<JobExecutionResponse>> get(@PathVariable UUID executionId) {
+    public ResponseEntity<ApiResponse<JobExecutionResponse>> get(@P("executionId") @PathVariable UUID executionId) {
         return ResponseEntity.ok(ApiResponse.of(executionService.get(executionId)));
     }
 
     @PostMapping("/api/v1/executions/{executionId}/cancel")
+    @PreAuthorize("@jobAuthorization.canAccessExecution(#executionId, authentication)")
     @Operation(summary = "Cancel an execution")
-    public ResponseEntity<ApiResponse<JobExecutionResponse>> cancel(@PathVariable UUID executionId) {
+    public ResponseEntity<ApiResponse<JobExecutionResponse>> cancel(@P("executionId") @PathVariable UUID executionId) {
         return ResponseEntity.ok(ApiResponse.of(executionService.cancel(executionId)));
     }
 
     @PostMapping("/api/v1/executions/{executionId}/retry")
+    @PreAuthorize("@jobAuthorization.canAccessExecution(#executionId, authentication)")
     @Operation(summary = "Retry a failed execution")
-    public ResponseEntity<ApiResponse<JobExecutionResponse>> retry(@PathVariable UUID executionId) {
+    public ResponseEntity<ApiResponse<JobExecutionResponse>> retry(@P("executionId") @PathVariable UUID executionId) {
         return ResponseEntity.ok(ApiResponse.of(executionService.retry(executionId)));
     }
 

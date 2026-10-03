@@ -49,4 +49,22 @@ class JobScheduleRepositoryTest {
 
         assertThat(scheduleRepository.findByJob_Id(job.getId())).isPresent();
     }
+
+    @Test
+    void findsDueSchedulesOnlyForActiveJobs() {
+        Instant dueAt = Instant.parse("2026-10-03T12:00:00Z");
+        Job activeJob = new Job("active-scheduled", null, "owner", 1, 60, RetryPolicy.defaults(), Map.of());
+        activeJob.transitionTo(JobStatus.ACTIVE);
+        jobRepository.saveAndFlush(activeJob);
+        Job pausedJob = new Job("paused-scheduled", null, "owner", 1, 60, RetryPolicy.defaults(), Map.of());
+        pausedJob.transitionTo(JobStatus.ACTIVE);
+        pausedJob.transitionTo(JobStatus.PAUSED);
+        jobRepository.saveAndFlush(pausedJob);
+        scheduleRepository.saveAndFlush(new JobSchedule(activeJob, ScheduleType.ONE_TIME, null, dueAt, dueAt));
+        scheduleRepository.saveAndFlush(new JobSchedule(pausedJob, ScheduleType.ONE_TIME, null, dueAt, dueAt));
+
+        assertThat(scheduleRepository.findDueForUpdate(dueAt, JobStatus.ACTIVE))
+                .extracting(JobSchedule::getJobId)
+                .containsExactly(activeJob.getId());
+    }
 }

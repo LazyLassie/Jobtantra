@@ -37,6 +37,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.test.util.ReflectionTestUtils;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 @ExtendWith(MockitoExtension.class)
 class ScheduleServiceTest {
@@ -115,7 +116,8 @@ class ScheduleServiceTest {
                 .thenAnswer(invocation -> Optional.of(persistedExecution.get()));
         when(executionRepository.findByIdForUpdate(EXECUTION_ID))
                 .thenAnswer(invocation -> Optional.of(persistedExecution.get()));
-        ExecutionService realExecutionService = new ExecutionService(jobRepository, executionRepository, attemptRepository);
+        ExecutionService realExecutionService = new ExecutionService(jobRepository, executionRepository, attemptRepository,
+            new SimpleMeterRegistry());
         ScheduleService scheduleService = new ScheduleService(jobRepository, scheduleRepository, realExecutionService);
 
         scheduleService.processDueSchedules(occurrence.plusSeconds(1));
@@ -125,7 +127,7 @@ class ScheduleServiceTest {
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.QUEUED);
         org.mockito.Mockito.verifyNoInteractions(executionHandler);
         ExecutionWorkerService worker = new ExecutionWorkerService(
-                new ExecutionClaimService(executionRepository, 0), executionHandler);
+            new ExecutionClaimService(executionRepository, 0, new SimpleMeterRegistry()), executionHandler);
         assertThat(worker.processNextPending()).isTrue();
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
         org.mockito.Mockito.verify(executionHandler).execute(execution);

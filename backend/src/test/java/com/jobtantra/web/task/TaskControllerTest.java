@@ -18,6 +18,7 @@ import com.jobtantra.application.task.dto.TaskResponse;
 import com.jobtantra.common.exception.GlobalExceptionHandler;
 import com.jobtantra.domain.model.TaskStatus;
 import com.jobtantra.security.SecurityConfig;
+import com.jobtantra.security.JobAuthorization;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -29,10 +30,15 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.core.Authentication;
+import org.junit.jupiter.api.BeforeEach;
+import static org.mockito.Mockito.lenient;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(TaskController.class)
 @Import({GlobalExceptionHandler.class, SecurityConfig.class})
+@TestPropertySource(properties = "jobtantra.auth.jwt-secret=security-tests-jwt-secret-at-least-32-bytes")
 @WithMockUser
 class TaskControllerTest {
 
@@ -42,6 +48,12 @@ class TaskControllerTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper objectMapper;
     @MockBean private TaskService taskService;
+        @MockBean(name = "jobAuthorization") private JobAuthorization jobAuthorization;
+
+        @BeforeEach
+        void allowOwnedResources() {
+                lenient().when(jobAuthorization.canAccessJob(any(UUID.class), any(Authentication.class))).thenReturn(true);
+        }
 
     @Test
     void createsHttpTask() throws Exception {

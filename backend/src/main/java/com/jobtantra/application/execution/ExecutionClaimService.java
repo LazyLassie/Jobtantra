@@ -11,19 +11,27 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ExecutionClaimService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(ExecutionClaimService.class);
+
     private final JobExecutionRepository executionRepository;
     private final long leaseGraceSeconds;
+    private final MeterRegistry meterRegistry;
 
     public ExecutionClaimService(JobExecutionRepository executionRepository,
-            @Value("${jobtantra.worker.lease-grace-seconds:30}") long leaseGraceSeconds) {
+            @Value("${jobtantra.worker.lease-grace-seconds:30}") long leaseGraceSeconds,
+            MeterRegistry meterRegistry) {
         this.executionRepository = executionRepository;
         this.leaseGraceSeconds = Math.max(0, leaseGraceSeconds);
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -48,6 +56,8 @@ public class ExecutionClaimService {
             .plusSeconds(leaseGraceSeconds);
         execution.claim(claimToken, now.plus(leaseDuration));
         executionRepository.saveAndFlush(execution);
+        LOGGER.info("Execution claimed and started jobId={} executionId={} attemptId={}",
+            execution.getJobId(), execution.getId(), attempt.getId());
 
         execution.getAttempts().size();
         return Optional.of(new ClaimedExecution(execution, claimToken));
@@ -78,6 +88,14 @@ public class ExecutionClaimService {
             scheduleRetryIfAllowed(execution, attempt.getAttemptNumber() - 1, completedAt);
         }
         executionRepository.saveAndFlush(execution);
+        if (failure == null) {
+            meterRegistry.counter("jobtantra.executions.success").increment();
+            LOGGER.info("Execution completed successfully jobId={} executionId={}",
+                    execution.getJobId(), execution.getId());
+        } else {
+            meterRegistry.counter("jobtantra.executions.failure").increment();
+            LOGGER.info("Execution failed jobId={} executionId={}", execution.getJobId(), execution.getId());
+        }
     }
 
     private void recoverOneExpiredExecution(Instant now) {
