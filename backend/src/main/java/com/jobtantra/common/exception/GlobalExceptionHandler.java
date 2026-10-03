@@ -5,6 +5,7 @@ import com.jobtantra.application.job.JobStateException;
 import com.jobtantra.application.execution.ExecutionStateException;
 import com.jobtantra.application.execution.MissingIdempotencyKeyException;
 import com.jobtantra.application.schedule.InvalidScheduleException;
+import com.jobtantra.application.task.InvalidTaskRequestException;
 import com.jobtantra.common.api.ApiError;
 import jakarta.servlet.http.HttpServletRequest;
 import java.time.Instant;
@@ -61,6 +62,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidScheduleException.class)
     public ResponseEntity<ApiError> handleInvalidSchedule(InvalidScheduleException exception, HttpServletRequest request) {
         return error(HttpStatus.BAD_REQUEST, "INVALID_SCHEDULE", exception.getMessage(), request, Map.of());
+    }
+
+    @ExceptionHandler(InvalidTaskRequestException.class)
+    public ResponseEntity<ApiError> handleInvalidTaskRequest(InvalidTaskRequestException exception,
+            HttpServletRequest request) {
+        return error(HttpStatus.BAD_REQUEST, "INVALID_TASK_REQUEST", exception.getMessage(), request, Map.of());
     }
 
     @ExceptionHandler(Exception.class)

@@ -98,6 +98,10 @@ public class Task extends AuditableEntity {
         return configuration;
     }
 
+    public void updateConfiguration(Map<String, Object> configuration) {
+        this.configuration = configuration == null ? new HashMap<>() : new HashMap<>(configuration);
+    }
+
     public Set<Task> getDependencies() {
         return dependencies;
     }
