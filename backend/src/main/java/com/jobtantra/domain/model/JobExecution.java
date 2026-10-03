@@ -20,7 +20,9 @@ import java.time.Instant;
 @Entity
 @Table(name = "job_executions", indexes = {
         @Index(name = "idx_job_executions_job_status", columnList = "job_id, status"),
-        @Index(name = "idx_job_executions_job_created_at", columnList = "job_id, created_at")
+    @Index(name = "idx_job_executions_job_created_at", columnList = "job_id, created_at"),
+    @Index(name = "idx_job_executions_available_at", columnList = "status, available_at"),
+    @Index(name = "idx_job_executions_lease_expires_at", columnList = "status, lease_expires_at")
 })
 public class JobExecution extends AuditableEntity {
 
@@ -37,6 +39,16 @@ public class JobExecution extends AuditableEntity {
     @NotNull
     @Column(name = "idempotency_key", nullable = false, length = 255)
     private String idempotencyKey;
+
+    @NotNull
+    @Column(name = "available_at", nullable = false)
+    private Instant availableAt = Instant.now();
+
+    @Column(name = "lease_expires_at")
+    private Instant leaseExpiresAt;
+
+    @Column(name = "claim_token")
+    private UUID claimToken;
 
     @OneToMany(mappedBy = "execution", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     private List<JobAttempt> attempts = new ArrayList<>();
@@ -65,6 +77,23 @@ public class JobExecution extends AuditableEntity {
 
     public void updateStatus(ExecutionStatus status) {
         this.status = status;
+    }
+
+    public void claim(UUID claimToken, Instant leaseExpiresAt) {
+        this.status = ExecutionStatus.RUNNING;
+        this.claimToken = claimToken;
+        this.leaseExpiresAt = leaseExpiresAt;
+    }
+
+    public void queueForRetry(Instant availableAt) {
+        this.status = ExecutionStatus.QUEUED;
+        this.availableAt = availableAt;
+        clearClaim();
+    }
+
+    public void clearClaim() {
+        this.claimToken = null;
+        this.leaseExpiresAt = null;
     }
 
     public void transitionTo(ExecutionStatus targetStatus, Instant now) {
@@ -97,6 +126,18 @@ public class JobExecution extends AuditableEntity {
 
     public String getIdempotencyKey() {
         return idempotencyKey;
+    }
+
+    public Instant getAvailableAt() {
+        return availableAt;
+    }
+
+    public Instant getLeaseExpiresAt() {
+        return leaseExpiresAt;
+    }
+
+    public UUID getClaimToken() {
+        return claimToken;
     }
 
     public List<JobAttempt> getAttempts() {

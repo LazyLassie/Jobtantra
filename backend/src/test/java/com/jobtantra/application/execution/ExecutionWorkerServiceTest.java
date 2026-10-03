@@ -31,12 +31,14 @@ class ExecutionWorkerServiceTest {
     @Mock private JobExecutionRepository executionRepository;
     @Mock private ExecutionHandler executionHandler;
 
+    private ExecutionClaimService claimService;
     private ExecutionWorkerService worker;
     private HttpServer httpServer;
 
     @BeforeEach
     void setUp() {
-        worker = new ExecutionWorkerService(executionRepository, executionHandler);
+        claimService = new ExecutionClaimService(executionRepository, 0);
+        worker = new ExecutionWorkerService(claimService, executionHandler);
     }
 
     @AfterEach
@@ -47,20 +49,21 @@ class ExecutionWorkerServiceTest {
     }
 
     @Test
-    void processesQueuedExecutionSuccessfully() {
+    void processesQueuedExecutionSuccessfully() throws Exception {
         JobExecution execution = queuedExecution();
-        when(executionRepository.findFirstQueuedForUpdate()).thenReturn(Optional.of(execution));
+        stubClaim(execution);
 
         assertThat(worker.processNextPending()).isTrue();
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
         assertThat(execution.getLatestAttempt().getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        verify(executionHandler).execute(execution);
         verify(executionRepository, org.mockito.Mockito.atLeastOnce()).saveAndFlush(execution);
     }
 
     @Test
     void sanitizesFailureAndMarksExecutionFailed() throws Exception {
-        JobExecution execution = queuedExecution();
-        when(executionRepository.findFirstQueuedForUpdate()).thenReturn(Optional.of(execution));
+        JobExecution execution = queuedExecution(new RetryPolicy(0, 0, 0, java.math.BigDecimal.ONE));
+        stubClaim(execution);
         doThrow(new IllegalStateException("database secret and stack details"))
                 .when(executionHandler).execute(execution);
 
@@ -76,7 +79,10 @@ class ExecutionWorkerServiceTest {
 
     @Test
     void doesNotProcessWhenNoQueuedExecutionExists() {
-        when(executionRepository.findFirstQueuedForUpdate()).thenReturn(Optional.empty());
+        when(executionRepository.findExpiredRunningIdForUpdate(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+        when(executionRepository.findNextQueuedIdForUpdate(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
 
         assertThat(worker.processNextPending()).isFalse();
     }
@@ -87,10 +93,10 @@ class ExecutionWorkerServiceTest {
         AtomicReference<String> requestBody = new AtomicReference<>();
         String url = startHttpServer("/run", 204, requestMethod, requestBody);
         JobExecution execution = queuedHttpExecution(url, "POST", "payload");
-        when(executionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
-        worker = new ExecutionWorkerService(executionRepository, new DefaultExecutionHandler());
+        stubClaim(execution);
+        worker = new ExecutionWorkerService(claimService, new DefaultExecutionHandler());
 
-        worker.process(execution.getId());
+        worker.processNextPending();
 
         assertThat(requestMethod.get()).isEqualTo("POST");
         assertThat(requestBody.get()).isEqualTo("payload");
@@ -99,13 +105,13 @@ class ExecutionWorkerServiceTest {
     }
 
     @Test
-    void unsuccessfulHttpTaskProducesSanitizedFailure() throws IOException {
+    void unsuccessfulHttpTaskProducesSanitizedFailure() throws Exception {
         String url = startHttpServer("/fail", 503, new AtomicReference<>(), new AtomicReference<>());
         JobExecution execution = queuedHttpExecution(url, "GET", null);
-        when(executionRepository.findByIdForUpdate(execution.getId())).thenReturn(Optional.of(execution));
-        worker = new ExecutionWorkerService(executionRepository, new DefaultExecutionHandler());
+        stubClaim(execution);
+        worker = new ExecutionWorkerService(claimService, new DefaultExecutionHandler());
 
-        worker.process(execution.getId());
+        worker.processNextPending();
 
         assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.FAILED);
         assertThat(execution.getLatestAttempt().getStatus()).isEqualTo(ExecutionStatus.FAILED);
@@ -128,7 +134,8 @@ class ExecutionWorkerServiceTest {
     }
 
     private JobExecution queuedHttpExecution(String url, String method, String body) {
-        Job job = new Job("http", null, "worker-test", 1, 60, RetryPolicy.defaults(), Map.of());
+        Job job = new Job("http", null, "worker-test", 1, 60,
+            new RetryPolicy(0, 0, 0, java.math.BigDecimal.ONE), Map.of());
         Map<String, Object> configuration = new java.util.HashMap<>();
         configuration.put("url", url);
         configuration.put("method", method);
@@ -142,9 +149,25 @@ class ExecutionWorkerServiceTest {
     }
 
     private JobExecution queuedExecution() {
-        Job job = new Job("local", null, "worker-test", 1, 60, RetryPolicy.defaults(), Map.of());
+        return queuedExecution(RetryPolicy.defaults());
+    }
+
+    private JobExecution queuedExecution(RetryPolicy retryPolicy) {
+        Job job = new Job("local", null, "worker-test", 1, 60, retryPolicy, Map.of());
         JobExecution execution = new JobExecution(job, "worker-test-key");
         execution.addAttempt();
         return execution;
     }
+
+    private void stubClaim(JobExecution execution) {
+        when(executionRepository.findExpiredRunningIdForUpdate(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.empty());
+        when(executionRepository.findNextQueuedIdForUpdate(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.of(EXECUTION_ID));
+        when(executionRepository.findById(EXECUTION_ID)).thenReturn(Optional.of(execution));
+        when(executionRepository.findByIdForUpdate(null)).thenReturn(Optional.of(execution));
+        when(executionRepository.saveAndFlush(execution)).thenReturn(execution);
+    }
+
+    private static final java.util.UUID EXECUTION_ID = java.util.UUID.randomUUID();
 }

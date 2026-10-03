@@ -1,11 +1,5 @@
 package com.jobtantra.application.execution;
 
-import com.jobtantra.domain.model.ExecutionStatus;
-import com.jobtantra.domain.model.JobAttempt;
-import com.jobtantra.domain.model.JobExecution;
-import com.jobtantra.common.exception.ResourceNotFoundException;
-import com.jobtantra.infrastructure.persistence.repository.JobExecutionRepository;
-import jakarta.transaction.Transactional;
 import java.time.Instant;
 import java.util.Optional;
 import org.slf4j.Logger;
@@ -16,55 +10,33 @@ import org.springframework.stereotype.Service;
 public class ExecutionWorkerService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ExecutionWorkerService.class);
-    private final JobExecutionRepository executionRepository;
+    private final ExecutionClaimService claimService;
     private final ExecutionHandler executionHandler;
 
-    public ExecutionWorkerService(JobExecutionRepository executionRepository, ExecutionHandler executionHandler) {
-        this.executionRepository = executionRepository;
+    public ExecutionWorkerService(ExecutionClaimService claimService, ExecutionHandler executionHandler) {
+        this.claimService = claimService;
         this.executionHandler = executionHandler;
     }
 
-    @Transactional
     public boolean processNextPending() {
-        Optional<JobExecution> pending = executionRepository.findFirstQueuedForUpdate();
+        Optional<ExecutionClaimService.ClaimedExecution> pending = claimService.claimNext(Instant.now());
         if (pending.isEmpty()) {
             return false;
         }
-        processClaimed(pending.get());
-        return true;
-    }
-
-    @Transactional
-    public void process(java.util.UUID executionId) {
-        Optional<JobExecution> pending = executionRepository.findByIdForUpdate(executionId);
-        if (pending.isEmpty() || pending.get().getStatus() != ExecutionStatus.QUEUED) {
-            return;
-        }
-        processClaimed(pending.get());
-    }
-
-    private void processClaimed(JobExecution execution) {
-        JobAttempt attempt = execution.getLatestAttempt();
+        ExecutionClaimService.ClaimedExecution claim = pending.get();
+        Exception failure = null;
+        boolean interrupted = false;
         try {
-            attempt.transitionTo(ExecutionStatus.RUNNING, Instant.now());
-            execution.updateStatus(ExecutionStatus.RUNNING);
-            executionRepository.saveAndFlush(execution);
-
-            executionHandler.execute(execution);
-
-            attempt.transitionTo(ExecutionStatus.SUCCEEDED, Instant.now());
-            execution.updateStatus(ExecutionStatus.SUCCEEDED);
+            executionHandler.execute(claim.execution());
         } catch (Exception exception) {
-            LOGGER.error("Execution handler failed for execution {}", execution.getId(), exception);
-            attempt.recordError("EXECUTION_FAILED", "Execution failed", diagnostic(exception));
-            attempt.transitionTo(ExecutionStatus.FAILED, Instant.now());
-            execution.updateStatus(ExecutionStatus.FAILED);
+            LOGGER.error("Execution handler failed for execution {}", claim.execution().getId(), exception);
+            failure = exception;
+            interrupted = exception instanceof InterruptedException;
         }
-        executionRepository.saveAndFlush(execution);
-    }
-
-    private String diagnostic(Exception exception) {
-        String message = exception.getMessage();
-        return exception.getClass().getName() + (message == null ? "" : ": " + message);
+        claimService.complete(claim, failure, Instant.now());
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        return true;
     }
 }

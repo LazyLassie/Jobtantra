@@ -1,7 +1,6 @@
 package com.jobtantra.application.schedule;
 
 import com.jobtantra.application.execution.ExecutionService;
-import com.jobtantra.application.execution.ExecutionWorkerService;
 import com.jobtantra.application.schedule.dto.ScheduleRequest;
 import com.jobtantra.application.schedule.dto.ScheduleResponse;
 import com.jobtantra.common.exception.ResourceNotFoundException;
@@ -26,14 +25,12 @@ public class ScheduleService {
     private final JobRepository jobRepository;
     private final JobScheduleRepository scheduleRepository;
     private final ExecutionService executionService;
-    private final ExecutionWorkerService executionWorkerService;
 
-    public ScheduleService(JobRepository jobRepository, JobScheduleRepository scheduleRepository,
-            ExecutionService executionService, ExecutionWorkerService executionWorkerService) {
+        public ScheduleService(JobRepository jobRepository, JobScheduleRepository scheduleRepository,
+            ExecutionService executionService) {
         this.jobRepository = jobRepository;
         this.scheduleRepository = scheduleRepository;
         this.executionService = executionService;
-        this.executionWorkerService = executionWorkerService;
     }
 
     @Transactional
@@ -67,10 +64,7 @@ public class ScheduleService {
     public void processDueSchedules(Instant now) {
         for (JobSchedule schedule : scheduleRepository.findDueForUpdate(now, JobStatus.ACTIVE)) {
             Instant occurrence = schedule.getNextRunAt();
-            var result = executionService.create(schedule.getJobId(), idempotencyKey(schedule, occurrence));
-            if (result.response().status() == com.jobtantra.domain.model.ExecutionStatus.QUEUED) {
-                executionWorkerService.process(result.response().id());
-            }
+            executionService.create(schedule.getJobId(), idempotencyKey(schedule, occurrence));
             schedule.markScheduled(occurrence, nextRunAt(schedule, occurrence));
             scheduleRepository.saveAndFlush(schedule);
         }

@@ -74,6 +74,7 @@ public class ExecutionService {
             throw new ExecutionStateException(exception.getMessage());
         }
         execution.updateStatus(ExecutionStatus.CANCELLED);
+        execution.clearClaim();
         executionRepository.saveAndFlush(execution);
         return toResponse(execution);
     }
@@ -90,8 +91,8 @@ public class ExecutionService {
         if (retryCount >= job.getMaxRetries()) {
             throw new ExecutionStateException("Retry limit reached for execution: " + executionId);
         }
-        JobAttempt next = execution.addAttempt();
-        execution.updateStatus(ExecutionStatus.QUEUED);
+        execution.addAttempt();
+        execution.queueForRetry(Instant.now());
         executionRepository.saveAndFlush(execution);
         return toResponse(execution);
     }

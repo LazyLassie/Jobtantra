@@ -23,10 +23,13 @@ public interface JobExecutionRepository extends JpaRepository<JobExecution, UUID
 
     Optional<JobExecution> findByJob_IdAndIdempotencyKey(UUID jobId, String idempotencyKey);
 
-        @Lock(LockModeType.PESSIMISTIC_WRITE)
-        @Query("select execution from JobExecution execution where execution.status = com.jobtantra.domain.model.ExecutionStatus.QUEUED "
-            + "order by execution.createdAt asc")
-        Optional<JobExecution> findFirstQueuedForUpdate();
+    @Query(value = "select id from job_executions where status = 'QUEUED' and available_at <= :now "
+            + "order by available_at asc, created_at asc limit 1 for update skip locked", nativeQuery = true)
+    Optional<UUID> findNextQueuedIdForUpdate(@Param("now") java.time.Instant now);
+
+    @Query(value = "select id from job_executions where status = 'RUNNING' and lease_expires_at <= :now "
+            + "order by lease_expires_at asc limit 1 for update skip locked", nativeQuery = true)
+    Optional<UUID> findExpiredRunningIdForUpdate(@Param("now") java.time.Instant now);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select execution from JobExecution execution where execution.id = :id")
