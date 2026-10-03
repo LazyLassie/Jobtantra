@@ -15,6 +15,8 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -118,6 +120,77 @@ class ExecutionWorkerServiceTest {
         assertThat(execution.getLatestAttempt().getErrorCode()).isEqualTo("EXECUTION_FAILED");
         assertThat(execution.getLatestAttempt().getErrorMessage()).isEqualTo("Execution failed");
         assertThat(execution.getLatestAttempt().getFailureDetail()).contains("status 503");
+    }
+
+    @Test
+    void executesMultipleTasksInAscendingSequenceOrderAndSucceeds() throws Exception {
+        List<String> requests = new ArrayList<>();
+        String baseUrl = startHttpServer(Map.of("/first", 204, "/second", 204), requests);
+        JobExecution execution = queuedExecution(new RetryPolicy(0, 0, 0, java.math.BigDecimal.ONE));
+        Job job = execution.getJob();
+        job.getTasks().add(httpTask(job, "second", 20, baseUrl + "/second"));
+        job.getTasks().add(httpTask(job, "first", 10, baseUrl + "/first"));
+        stubClaim(execution);
+        worker = new ExecutionWorkerService(claimService, new DefaultExecutionHandler());
+
+        worker.processNextPending();
+
+        assertThat(requests).containsExactly("/first", "/second");
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
+        assertThat(execution.getLatestAttempt().getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
+    }
+
+    @Test
+    void executesHttpTaskAfterNoOpTask() throws Exception {
+        List<String> requests = new ArrayList<>();
+        String baseUrl = startHttpServer(Map.of("/after-noop", 204), requests);
+        JobExecution execution = queuedExecution(new RetryPolicy(0, 0, 0, java.math.BigDecimal.ONE));
+        Job job = execution.getJob();
+        job.getTasks().add(new Task(job, "noop", "NO_OP", 0, Map.of()));
+        job.getTasks().add(httpTask(job, "http", 1, baseUrl + "/after-noop"));
+        stubClaim(execution);
+        worker = new ExecutionWorkerService(claimService, new DefaultExecutionHandler());
+
+        worker.processNextPending();
+
+        assertThat(requests).containsExactly("/after-noop");
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.SUCCEEDED);
+    }
+
+    @Test
+    void taskFailureStopsSubsequentTasks() throws Exception {
+        List<String> requests = new ArrayList<>();
+        String baseUrl = startHttpServer(Map.of("/failure", 503, "/must-not-run", 204), requests);
+        JobExecution execution = queuedExecution(new RetryPolicy(0, 0, 0, java.math.BigDecimal.ONE));
+        Job job = execution.getJob();
+        job.getTasks().add(httpTask(job, "later", 20, baseUrl + "/must-not-run"));
+        job.getTasks().add(httpTask(job, "failure", 10, baseUrl + "/failure"));
+        stubClaim(execution);
+        worker = new ExecutionWorkerService(claimService, new DefaultExecutionHandler());
+
+        worker.processNextPending();
+
+        assertThat(requests).containsExactly("/failure");
+        assertThat(execution.getStatus()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(execution.getLatestAttempt().getStatus()).isEqualTo(ExecutionStatus.FAILED);
+        assertThat(execution.getLatestAttempt().getErrorMessage()).isEqualTo("Execution failed");
+    }
+
+    private String startHttpServer(Map<String, Integer> routes, List<String> requests) throws IOException {
+        httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        routes.forEach((path, responseStatus) -> httpServer.createContext(path, exchange -> {
+            requests.add(exchange.getRequestURI().getPath());
+            exchange.getRequestBody().readAllBytes();
+            exchange.sendResponseHeaders(responseStatus, -1);
+            exchange.close();
+        }));
+        httpServer.start();
+        return "http://127.0.0.1:" + httpServer.getAddress().getPort();
+    }
+
+    private Task httpTask(Job job, String name, int sequenceOrder, String url) {
+        return new Task(job, name, "HTTP", sequenceOrder,
+                Map.of("url", url, "method", "GET"));
     }
 
     private String startHttpServer(String path, int responseStatus, AtomicReference<String> requestMethod,

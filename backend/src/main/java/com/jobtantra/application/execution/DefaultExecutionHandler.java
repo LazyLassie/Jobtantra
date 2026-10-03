@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Comparator;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
@@ -25,7 +26,9 @@ public class DefaultExecutionHandler implements ExecutionHandler {
             throw new IllegalStateException("Execution has no associated job");
         }
 
-        for (Task task : job.getTasks()) {
+        for (Task task : job.getTasks().stream()
+            .sorted(Comparator.comparingInt(Task::getSequenceOrder))
+            .toList()) {
             if (task.getStatus() != TaskStatus.ACTIVE) {
                 continue;
             }
