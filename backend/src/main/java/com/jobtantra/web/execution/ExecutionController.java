@@ -11,6 +11,9 @@ import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.net.URI;
 import java.util.UUID;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -66,5 +69,51 @@ public class ExecutionController {
     public ResponseEntity<ApiResponse<JobExecutionResponse>> retry(@P("executionId") @PathVariable UUID executionId) {
         return ResponseEntity.ok(ApiResponse.of(executionService.retry(executionId)));
     }
+
+    @PostMapping("/{executionId}/ai-analysis")
+    public ResponseEntity<String> analyzeWithAi(@PathVariable UUID executionId) {
+    JobExecutionResponse execution = executionService.get(executionId);
+    String error = execution.errorMessage();
+    String apiKey = System.getenv("ANTHROPIC_API_KEY");
+
+    if (apiKey == null || apiKey.isBlank()) {
+        return ResponseEntity.internalServerError()
+                .body("ANTHROPIC_API_KEY is not configured");
+    }
+
+    String requestBody = """
+        {
+          "model": "claude-haiku-4-5-20251001",
+          "max_tokens": 300,
+          "messages": [
+            {
+              "role": "user",
+              "content": "Analyze this job execution error. Give the likely root cause and one recommended fix:\\n%s"
+            }
+          ]
+        }
+        """.formatted(error.replace("\"", "\\\""));
+
+    try {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.anthropic.com/v1/messages"))
+                .header("Content-Type", "application/json")
+                .header("x-api-key", apiKey)
+                .header("anthropic-version", "2023-06-01")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = HttpClient.newHttpClient()
+                .send(request, HttpResponse.BodyHandlers.ofString());
+
+        return ResponseEntity
+                .status(response.statusCode())
+                .body(response.body());
+
+    } catch (Exception e) {
+        return ResponseEntity.internalServerError()
+                .body("AI analysis failed");
+    }
+   }
 
 }
